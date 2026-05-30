@@ -1,0 +1,325 @@
+import React, { useRef, useState, useEffect, useTransition } from 'react';
+import { Sparkles, Terminal, Code, Cpu, Layers } from 'lucide-react';
+
+const TOTAL_FRAMES = 335; 
+const FRAME_PATH = (n: number) => `/src/assets/hero section/ezgif-frame-${String(n).padStart(3, '0')}.jpg`;
+
+export default function HeroSection() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [scrollProgress, setScrollProgress] = useState(0);
+  const [images, setImages] = useState<HTMLImageElement[]>([]);
+  const [loadingFrames, setLoadingFrames] = useState(true);
+  const [useFallbackDraw, setUseFallbackDraw] = useState(false);
+  const [, startTransition] = useTransition();
+
+  // Progressive Preloading of Frames
+  useEffect(() => {
+    let active = true;
+    const preloadedImages: HTMLImageElement[] = [];
+    let loadedCount = 0;
+
+    const loadBatch = async (start: number, end: number) => {
+      for (let i = start; i <= end; i++) {
+        if (!active) return;
+        const img = new Image();
+        img.src = FRAME_PATH(i);
+        img.onload = () => {
+          loadedCount++;
+          if (loadedCount >= 30 && active) {
+            setLoadingFrames(false);
+          }
+        };
+        img.onerror = () => {
+          if (active) setUseFallbackDraw(true);
+        };
+        preloadedImages.push(img);
+      }
+      if (active) setImages([...preloadedImages]);
+    };
+
+    const initializePreload = async () => {
+      // Fast load initial critical frame set
+      await loadBatch(1, Math.min(40, TOTAL_FRAMES));
+      if (TOTAL_FRAMES > 40) {
+        loadBatch(41, TOTAL_FRAMES);
+      }
+    };
+
+    initializePreload();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Sync scroll positioning
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const containerHeight = containerRef.current.offsetHeight;
+      const windowHeight = window.innerHeight;
+
+      const scrollPos = -rect.top;
+      const totalScrollable = containerHeight - windowHeight;
+      const progress = Math.max(0, Math.min(1, scrollPos / totalScrollable));
+      startTransition(() => {
+        setScrollProgress(progress);
+      });
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    handleScroll();
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Draw code to canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = (canvas.width = window.innerWidth);
+    const height = (canvas.height = window.innerHeight);
+
+    const frameIndex = Math.floor(scrollProgress * (TOTAL_FRAMES - 1));
+
+    if (useFallbackDraw || images.length === 0 || !images[frameIndex] || !images[frameIndex].complete) {
+      ctx.clearRect(0, 0, width, height);
+
+      const bgGrad = ctx.createRadialGradient(width / 2, height / 2, 50, width / 2, height / 2, Math.max(width, height) * 0.8);
+      bgGrad.addColorStop(0, '#0F0F11');
+      bgGrad.addColorStop(1, '#050505');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, width, height);
+
+      // Perspective Grid lines
+      ctx.strokeStyle = 'rgba(79, 172, 254, 0.05)';
+      ctx.lineWidth = 1;
+      const cols = 50;
+      const rows = 30;
+      for (let i = 0; i < cols; i++) {
+        ctx.beginPath();
+        ctx.moveTo((i * width) / cols, 0);
+        ctx.lineTo((i * width) / cols, height);
+        ctx.stroke();
+      }
+      for (let j = 0; j < rows; j++) {
+        ctx.beginPath();
+        ctx.moveTo(0, (j * height) / rows);
+        ctx.lineTo(width, (j * height) / rows);
+        ctx.stroke();
+      }
+
+      const cx = width / 2;
+      const cy = height / 2;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(scrollProgress * Math.PI * 2);
+
+      if (scrollProgress > 0.68) {
+        const panOffset = (scrollProgress - 0.68) * 200;
+        ctx.translate(panOffset, 0);
+      }
+
+      for (let r = 80; r < Math.min(width, height) * 0.5; r += 35) {
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r, r * 0.4, Math.PI / 4, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(200, 80, 192, 0.15)';
+        ctx.stroke();
+      }
+      ctx.restore();
+    } else {
+      ctx.clearRect(0, 0, width, height);
+      const img = images[frameIndex];
+      const imgRatio = img.width / img.height;
+      const canvasRatio = width / height;
+
+      let drawWidth = width;
+      let drawHeight = height;
+      let startX = 0;
+      let startY = 0;
+
+      if (imgRatio > canvasRatio) {
+        drawWidth = height * imgRatio;
+        startX = (width - drawWidth) / 2;
+      } else {
+        drawHeight = width / imgRatio;
+        startY = (height - drawHeight) / 2;
+      }
+
+      ctx.drawImage(img, startX, startY, drawWidth, drawHeight);
+    }
+  }, [scrollProgress, images, useFallbackDraw]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative w-full h-[550vh] bg-[#050505]" id="hero-scrub">
+      {/* Sticky Fullscreen Canvas Pipeline */}
+      <div className="sticky top-0 left-0 w-full h-screen overflow-hidden z-10 flex items-center justify-center">
+        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block object-cover filter brightness-[0.7] contrast-[1.1]" />
+
+        {/* Global Core Frame Loading Overlay */}
+        {loadingFrames && !useFallbackDraw && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#050505] z-50">
+            <div className="w-10 h-10 rounded-full border-2 border-[#C850C0] border-t-transparent animate-spin mb-4" />
+            <span className="font-mono text-[10px] text-gray-500 tracking-[0.3em] uppercase">
+              Initializing Spatial Environment...
+            </span>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* INTERACTIVE TEXT MATRICES WITH HIGH READABILITY CONTRAST                  */}
+        {/* ========================================================================= */}
+        <div className="absolute inset-0 w-full h-full pointer-events-none select-none z-20 font-sans px-6 sm:px-12 md:px-24 flex items-center">
+          
+          {/* PHASE 1: [0% - 22%] LEFT SIDE - Title Intro */}
+          <div
+            className="absolute left-6 md:left-24 max-w-xl p-6 sm:p-8 bg-[#050507]/80 border border-white/10 backdrop-blur-md rounded-none transition-all duration-300 shadow-[0_20px_50px_rgba(0,0,0,0.5)]"
+            style={{
+              opacity: scrollProgress >= 0 && scrollProgress < 0.22 ? 1 - (scrollProgress * 4.5) : 0,
+              transform: `translate3d(${scrollProgress * -60}px, 0, 0)`,
+              visibility: scrollProgress < 0.22 ? 'visible' : 'hidden'
+            }}
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <Terminal className="w-4 h-4 text-[#4FACFE]" />
+              <span className="font-mono text-xs text-[#4FACFE] tracking-[0.25em] uppercase font-bold">SYSTEM.INIT()</span>
+            </div>
+            <h1 className="font-black text-5xl sm:text-7xl md:text-8xl text-white leading-none tracking-tighter uppercase">
+              SARTHAK
+            </h1>
+            <p className="text-xs sm:text-sm font-mono tracking-[0.2em] text-[#C850C0] uppercase mt-4 font-bold">
+              Computer Science Engineer & Data Scientist
+            </p>
+          </div>
+
+          {/* PHASE 2: [22% - 45%] RIGHT SIDE - Specialization Detail */}
+          <div
+            className="absolute right-6 md:right-24 max-w-md text-right p-6 sm:p-8 bg-[#050507]/80 border border-[#C850C0]/20 backdrop-blur-md rounded-none transition-all duration-300 shadow-[0_20px_50px_rgba(0,0,0,0.5)]"
+            style={{
+              opacity: scrollProgress >= 0.18 && scrollProgress < 0.45 ? 1 - Math.abs((scrollProgress - 0.32) * 7.5) : 0,
+              transform: `translate3d(${(scrollProgress - 0.32) * 60}px, 0, 0)`,
+              visibility: scrollProgress >= 0.18 && scrollProgress < 0.45 ? 'visible' : 'hidden'
+            }}
+          >
+            <div className="flex items-center justify-end gap-2 mb-3">
+              <span className="font-mono text-xs text-[#C850C0] tracking-[0.25em] uppercase font-bold">CORE ARCHITECTURE</span>
+              <Cpu className="w-4 h-4 text-[#C850C0]" />
+            </div>
+            <h2 className="text-xl sm:text-3xl font-black text-white uppercase tracking-tight mb-4">
+              Data Science x IBM Partnership
+            </h2>
+            <p className="text-xs sm:text-sm text-gray-300 font-light leading-relaxed">
+              Combining deep analytical capabilities in mathematical modeling, statistical systems, and predictive logic with state-of-the-art interface deployment.
+            </p>
+          </div>
+
+          {/* PHASE 3: [45% - 68%] LEFT SIDE - Cognitive & UI/UX Value */}
+          <div
+            className="absolute left-6 md:left-24 max-w-xl p-6 sm:p-8 bg-[#050507]/80 border border-[#4FACFE]/20 backdrop-blur-md rounded-none transition-all duration-300 shadow-[0_20px_50px_rgba(0,0,0,0.5)]"
+            style={{
+              opacity: scrollProgress >= 0.40 && scrollProgress < 0.68 ? 1 - Math.abs((scrollProgress - 0.54) * 7.1) : 0,
+              transform: `translate3d(${(scrollProgress - 0.54) * -60}px, 0, 0)`,
+              visibility: scrollProgress >= 0.40 && scrollProgress < 0.68 ? 'visible' : 'hidden'
+            }}
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <Layers className="w-4 h-4 text-[#4FACFE]" />
+              <span className="font-mono text-xs text-[#4FACFE] tracking-[0.25em] uppercase font-bold">VISUAL SYNTHESIS</span>
+            </div>
+            <h2 className="text-xl sm:text-3xl font-black text-white uppercase tracking-tight mb-4">
+              Tactile Fine Arts & Spatial Intuition 
+            </h2>
+            <p className="text-xs sm:text-sm text-gray-300 font-light leading-relaxed">
+              Leveraging a background in sculpture arts and architectural aesthetics to map extreme design asset composition straight onto highly stable digital layouts.
+            </p>
+          </div>
+
+          {/* PHASE 4: [68% - 88%] RIGHT SIDE - High-Density Stats Box */}
+          <div
+            className="absolute right-6 md:right-24 max-w-sm transition-all duration-300"
+            style={{
+              opacity: scrollProgress >= 0.65 && scrollProgress < 0.90 ? 1 - Math.abs((scrollProgress - 0.78) * 8.5) : 0,
+              transform: `translate3d(${(scrollProgress - 0.78) * 80}px, 0, 0)`,
+              visibility: scrollProgress >= 0.65 && scrollProgress < 0.90 ? 'visible' : 'hidden'
+            }}
+          >
+            <div className="bg-[#050507]/90 border border-white/10 backdrop-blur-xl p-6 rounded-none shadow-[0_25px_60px_rgba(0,0,0,0.7)] text-left">
+              <span className="font-mono text-[10px] text-gray-500 uppercase tracking-widest block mb-1">SYSTEM STATUS</span>
+              <div className="h-[2px] w-12 bg-gradient-to-r from-[#4FACFE] to-[#C850C0] mb-4" />
+              
+              <div className="space-y-4 font-mono">
+                <div>
+                  <div className="text-[10px] text-[#4FACFE] uppercase tracking-wider font-bold">LIFECYCLE ORCHESTRATION</div>
+                  <div className="text-xs text-gray-300 mt-1 font-sans font-light leading-relaxed">Continuous Class Representative & Lead Hackathon Organizer.</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-[#C850C0] uppercase tracking-wider font-bold">ENGINEERING PRESETS</div>
+                  <div className="text-xs text-gray-300 mt-1 font-sans font-light leading-relaxed">Full-Stack React Frameworks, Automated Data Analytics, and Machine Learning.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* PHASE 5: [88% - 100%] CENTER EMBED - Massive Final CTA Outro */}
+          <div
+            className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 bg-[#050507]/40 backdrop-blur-[2px] transition-all duration-300"
+            style={{
+              opacity: scrollProgress >= 0.86 ? (scrollProgress - 0.86) * 7.1 : 0,
+              transform: `scale(${0.9 + (scrollProgress - 0.86) * 0.1})`,
+              visibility: scrollProgress >= 0.86 ? 'visible' : 'hidden'
+            }}
+          >
+            <span className="font-mono text-xs text-[#4FACFE] uppercase tracking-[0.4em] mb-4 block font-bold">
+              ENTER THE UNIVERSE
+            </span>
+            <h3 className="text-3xl sm:text-6xl font-black text-white tracking-tighter uppercase mb-6 [text-shadow:0_10px_30px_rgba(0,0,0,0.8)]">
+              LOGIC MEETS ARTISTRY
+            </h3>
+            <button
+              onClick={() => {
+                const targetEl = document.getElementById('hero-scrub');
+                if (targetEl) {
+                  window.scrollTo({
+                    top: targetEl.offsetTop + targetEl.offsetHeight,
+                    behavior: 'smooth'
+                  });
+                }
+              }}
+              className="group pointer-events-auto bg-white text-black font-mono text-xs uppercase font-bold tracking-widest px-8 py-4 rounded-none hover:bg-transparent hover:text-white border border-white transition-all duration-300 flex items-center gap-3 mx-auto shadow-2xl"
+            >
+              <span>Explore Ecosystem</span>
+              <Sparkles className="h-4 w-4 text-[#C850C0] group-hover:rotate-12 transition-transform" />
+            </button>
+          </div>
+
+        </div>
+
+        {/* Premium Bottom Scrub Bar Indicator */}
+        <div className="absolute bottom-8 left-8 right-8 flex items-center justify-between text-gray-400 font-mono text-[9px] tracking-widest pointer-events-none z-20 bg-[#050507]/60 backdrop-blur-sm p-2 px-3 border border-white/5">
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#4FACFE] animate-ping" />
+            <span>FRAME_IDX: {String(Math.floor(scrollProgress * (TOTAL_FRAMES - 1)) + 1).padStart(3, '0')} / {TOTAL_FRAMES}</span>
+          </div>
+          <div className="uppercase hidden sm:block">SCROLL TO SCRUB TIMELINE</div>
+          <div>{Math.floor(scrollProgress * 100)}% DETECTED</div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
